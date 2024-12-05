@@ -1,0 +1,31 @@
+{
+	"schemaVersion": 1,
+	"id": "dhrescue",
+	"version": "${version}",
+	"name": "DH Rescue",
+	"description": "Loka doesn't sponsor chunk corruption!",
+	"authors": [
+		"Lokachop"
+	],
+	"contact": {
+		"homepage": "https://github.com/lokachop",
+		"sources": "https://github.com/lokachop/dhrescue"
+	},
+	"license": "CC0-1.0",
+	"icon": "assets/dhrescue/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.dhrescue.DHRescue"
+		]
+	},
+	"mixins": [
+		"dhrescue.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.14.21",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}
