@@ -1,6 +1,6 @@
 # DHRescue
 > [!CAUTION]
-> DON'T USE THIS ON A PRODUCTION SERVER THIS IS UNSAFE, ONLY USE IT ON LOCAL WORLDS
+> **DON'T USE THIS ON A PRODUCTION SERVER THIS IS UNSAFE, ONLY USE IT ON LOCAL WORLDS**
 
 > [!WARNING]
 > This crashes on dedicated servers <sub>(you shouldn't use it there regardless)</sub>
