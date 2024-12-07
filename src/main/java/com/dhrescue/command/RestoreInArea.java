@@ -83,7 +83,7 @@ public class RestoreInArea {
                                 for (int z = minZ; z < maxZ; z++) {
                                     DhApiResult<DhApiTerrainDataPoint> queryResult = DhApi.Delayed.terrainRepo.getSingleDataPointAtBlockPos(levelWrapper, x, y, z, terrainCache);
 
-                                    BlockPos currBlockPos = new BlockPos(x, y, z - 1);
+                                    BlockPos currBlockPos = new BlockPos(x, y, z);
                                     if(queryResult.payload == null) {
                                         continue;
                                     }
