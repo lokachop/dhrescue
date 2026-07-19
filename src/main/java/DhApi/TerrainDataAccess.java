@@ -94,7 +94,7 @@ public class TerrainDataAccess
 		// (IE clear the cache once in a while otherwise the data you pull won't match what's real).
 		if (this.terrainCache == null)
 		{
-			this.terrainCache = DhApi.Delayed.terrainRepo.getSoftCache();
+			this.terrainCache = DhApi.Delayed.terrainRepo.createSoftCache();
 		}
 		
 		
