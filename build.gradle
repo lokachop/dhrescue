@@ -42,14 +42,14 @@ dependencies {
     // Distant Horizon example dependencies: //
     
     // Add the DH Api for compile time development
-    implementation "maven.modrinth:DistantHorizonsApi:4.0.0" // maven
-    //implementation "blank:DistantHorizonsAPI-4.0.0" // local Jar file, ile should be named in the format: "DistantHorizonsAPI-VERSION.jar"  IE "DistantHorizonsAPI-2.0.0a-dev.jar"
+    //implementation "maven.modrinth:DistantHorizonsApi:4.0.0" // maven
+    implementation "blank:DistantHorizonsApi-6.1.0" // local Jar file, ile should be named in the format: "DistantHorizonsAPI-VERSION.jar"  IE "DistantHorizonsAPI-2.0.0a-dev.jar"
     
     // Add the Full DH mod for runtime use
     // Note: Don't add this with "Implementation", otherwise you may 
     // accidentally use non-API methods that could change without notice
     //modRuntimeOnly "maven.modrinth:DistantHorizons:2.2.1-a-1.21.1" // maven
-    modRuntimeOnly "blank:DistantHorizons-2.3.0-b-dev" // local Jar file, file should use the name format: "DistantHorizons-VERSION.jar"  IE "DistantHorizons-2.0.0a-dev.jar"
+    modRuntimeOnly "blank:DistantHorizons-3.0.3-b-1.21.1-fabric-neoforge" // local Jar file, file should use the name format: "DistantHorizons-VERSION.jar"  IE "DistantHorizons-2.0.0a-dev.jar"
     
 }
 
