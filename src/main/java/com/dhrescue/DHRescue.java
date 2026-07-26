@@ -50,6 +50,11 @@ public class DHRescue implements ModInitializer
 		// Serverside only
 		DHRescueNetworking.register_SV();
 
+		// Client-side only (S2C receivers)
+		if (FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
+			DHRescueNetworking.registerClient();
+		}
+
 		// Register commands
 		RestoreInArea.register();
 		

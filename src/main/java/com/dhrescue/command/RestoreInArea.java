@@ -1,5 +1,7 @@
 package com.dhrescue.command;
 
+import com.dhrescue.networking.ChunkDonePayload;
+import com.dhrescue.networking.DHRescueNetworking;
 import com.dhrescue.networking.SetBlockPayload;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.seibel.distanthorizons.api.DhApi;
@@ -10,79 +12,24 @@ import com.seibel.distanthorizons.api.objects.data.DhApiTerrainDataPoint;
 
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
+import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.*;
 
 import static net.fabricmc.fabric.api.client.command.v2.ClientCommandManager.argument;
 
 public class RestoreInArea {
 
-    private static final int THREADS = 10;
-    // Base blocks sent per tick — multiplied by speedMultiplier
-    private static final int BLOCKS_PER_TICK = 256;
-    // How many ticks to wait between batches (server catch-up time)
-    private static final int TICKS_BETWEEN_BATCHES = 2;
-    // Adjustable speed multiplier, changed via /dhrescue_speed
-    private static volatile int speedMultiplier = 1;
-
+    private static final int THREAD_COUNT = 10;
     private static final AtomicBoolean isRunning = new AtomicBoolean(false);
 
-    // Shared send queue drained by the tick event
-    private static final ConcurrentLinkedQueue<SetBlockPayload> sendQueue = new ConcurrentLinkedQueue<>();
-    private static final AtomicInteger totalQueued = new AtomicInteger(0);
-    private static final AtomicInteger totalSent = new AtomicInteger(0);
-    private static final AtomicBoolean collectingDone = new AtomicBoolean(false);
-    private static int tickCooldown = 0;
-
     public static void register() {
-        // Tick event drains the send queue in small batches, waiting TICKS_BETWEEN_BATCHES ticks between each
-        ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (!isRunning.get()) return;
-
-            if (tickCooldown > 0) {
-                tickCooldown--;
-                return;
-            }
-
-            int sent = 0;
-            int limit = BLOCKS_PER_TICK * speedMultiplier;
-            while (sent < limit && !sendQueue.isEmpty()) {
-                SetBlockPayload payload = sendQueue.poll();
-                if (payload == null) break;
-                ClientPlayNetworking.send(payload);
-                sent++;
-                totalSent.incrementAndGet();
-            }
-
-            if (sent > 0) {
-                tickCooldown = TICKS_BETWEEN_BATCHES;
-            }
-
-            // Report progress every ~5 seconds (100 ticks)
-            int sent2 = totalSent.get();
-            int queued = totalQueued.get();
-            if (queued > 0 && sent2 % (BLOCKS_PER_TICK * 20) < BLOCKS_PER_TICK) {
-                int pct = (int)((sent2 / (float) queued) * 100);
-                if (client.player != null)
-                    client.player.sendMessage(Text.of("[DHRescue] " + sent2 + " / " + queued + " blocks sent (" + pct + "%)"), true);
-            }
-
-            // Done when queue empty and all collectors finished
-            if (sendQueue.isEmpty() && collectingDone.get()) {
-                isRunning.set(false);
-                if (client.player != null)
-                    client.player.sendMessage(Text.of("[DHRescue] Done! Placed " + totalSent.get() + " blocks."), false);
-            }
-        });
-
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             dispatcher.register(ClientCommandManager.literal("dhrescue_restorearea")
                     .then(argument("minXIn", IntegerArgumentType.integer())
@@ -93,15 +40,12 @@ public class RestoreInArea {
                     .then(argument("maxZIn", IntegerArgumentType.integer())
                     .executes(context -> {
                         MinecraftClient mc = MinecraftClient.getInstance();
-                        if (mc == null) { System.out.println("No MC"); return 0; }
-
+                        if (mc == null) { System.out.println("[DHRescue] No MC"); return 0; }
                         ClientPlayerEntity player = mc.player;
-                        if (player == null) { System.out.println("No Client"); return 0; }
-
-                        if (!DhApi.Delayed.worldProxy.worldLoaded()) { System.out.println("No World loaded"); return 0; }
-
+                        if (player == null) { System.out.println("[DHRescue] No Client"); return 0; }
+                        if (!DhApi.Delayed.worldProxy.worldLoaded()) { player.sendMessage(Text.of("[DHRescue] No World loaded"), false); return 0; }
                         IDhApiLevelWrapper levelWrapper = DhApi.Delayed.worldProxy.getSinglePlayerLevel();
-                        if (levelWrapper == null) { System.out.println("No Level Wrapper"); return 0; }
+                        if (levelWrapper == null) { player.sendMessage(Text.of("[DHRescue] No Level Wrapper"), false); return 0; }
 
                         if (isRunning.get()) {
                             player.sendMessage(Text.of("[DHRescue] Already running! Wait for it to finish."), false);
@@ -115,103 +59,140 @@ public class RestoreInArea {
                         int maxY = Math.max(IntegerArgumentType.getInteger(context, "minYIn"), IntegerArgumentType.getInteger(context, "maxYIn"));
                         int maxZ = Math.max(IntegerArgumentType.getInteger(context, "minZIn"), IntegerArgumentType.getInteger(context, "maxZIn"));
 
-                        // Build chunk list (each chunk is 16x16 block columns)
-                        int chunkMinX = Math.floorDiv(minX, 16);
-                        int chunkMinZ = Math.floorDiv(minZ, 16);
-                        int chunkMaxX = Math.floorDiv(maxX - 1, 16);
-                        int chunkMaxZ = Math.floorDiv(maxZ - 1, 16);
-
+                        // Build the list of chunk coords that overlap the requested area
+                        int chunkMinX = minX >> 4;
+                        int chunkMinZ = minZ >> 4;
+                        int chunkMaxX = (maxX - 1) >> 4;
+                        int chunkMaxZ = (maxZ - 1) >> 4;
                         int totalChunks = (chunkMaxX - chunkMinX + 1) * (chunkMaxZ - chunkMinZ + 1);
 
-                        // Reset state
-                        sendQueue.clear();
-                        totalQueued.set(0);
-                        totalSent.set(0);
-                        collectingDone.set(false);
-                        tickCooldown = 0;
+                        player.sendMessage(Text.of("[DHRescue] Starting: " + totalChunks + " chunks, " + THREAD_COUNT + " threads..."), false);
                         isRunning.set(true);
 
-                        player.sendMessage(Text.of("[DHRescue] Starting restore — " + totalChunks + " chunks across " + THREADS + " threads..."), false);
-
-                        // Fill a work queue with chunk coordinates
-                        ConcurrentLinkedQueue<int[]> chunkWork = new ConcurrentLinkedQueue<>();
+                        // Shared queue of chunks to process
+                        BlockingQueue<int[]> chunkQueue = new LinkedBlockingQueue<>();
                         for (int cx = chunkMinX; cx <= chunkMaxX; cx++)
                             for (int cz = chunkMinZ; cz <= chunkMaxZ; cz++)
-                                chunkWork.add(new int[]{cx, cz});
+                                chunkQueue.add(new int[]{cx, cz});
 
-                        AtomicInteger chunksProcessed = new AtomicInteger(0);
-                        CountDownLatch latch = new CountDownLatch(THREADS);
+                        AtomicInteger doneChunks = new AtomicInteger(0);
+                        AtomicInteger lastReportedPct = new AtomicInteger(-1);
 
-                        ExecutorService pool = Executors.newFixedThreadPool(THREADS, r -> {
+                        ExecutorService pool = Executors.newFixedThreadPool(THREAD_COUNT, r -> {
                             Thread t = new Thread(r, "DHRescue-Worker");
                             t.setDaemon(true);
                             return t;
                         });
 
-                        for (int i = 0; i < THREADS; i++) {
+                        for (int i = 0; i < THREAD_COUNT; i++) {
                             pool.submit(() -> {
-                                try {
-                                    IDhApiTerrainDataCache cache = DhApi.Delayed.terrainRepo.createSoftCache();
+                                // Each thread gets its own DH cache
+                                IDhApiTerrainDataCache cache = DhApi.Delayed.terrainRepo.createSoftCache();
 
-                                    int[] chunk;
-                                    while ((chunk = chunkWork.poll()) != null) {
-                                        int cxStart = chunk[0] * 16;
-                                        int czStart = chunk[1] * 16;
+                                while (true) {
+                                    int[] chunk = chunkQueue.poll();
+                                    if (chunk == null) break; // queue empty, thread is done
 
-                                        for (int x = Math.max(cxStart, minX); x < Math.min(cxStart + 16, maxX); x++) {
-                                            for (int z = Math.max(czStart, minZ); z < Math.min(czStart + 16, maxZ); z++) {
-                                                DhApiResult<DhApiTerrainDataPoint[]> col =
-                                                    DhApi.Delayed.terrainRepo.getColumnDataAtBlockPos(levelWrapper, x, z, cache);
-                                                if (col == null || col.payload == null) continue;
+                                    int cx = chunk[0], cz = chunk[1];
 
-                                                for (DhApiTerrainDataPoint dp : col.payload) {
-                                                    if (dp == null || dp.blockStateWrapper == null) continue;
-                                                    int yStart = Math.max(dp.bottomYBlockPos, minY);
-                                                    int yEnd = Math.min(dp.topYBlockPos, maxY - 1);
-                                                    if (yStart > yEnd) continue;
-                                                    String bID = dp.blockStateWrapper.getSerialString();
-                                                    for (int y = yStart; y <= yEnd; y++) {
-                                                        sendQueue.add(new SetBlockPayload(new BlockPos(x, y, z), bID));
-                                                        totalQueued.incrementAndGet();
-                                                    }
-                                                }
+                                    // --- 1. Collect blocks for this chunk, sorted bottom-to-top ---
+                                    // Placing bottom-to-top means supporting blocks are in place before
+                                    // blocks like sand are placed on top, preventing unnecessary falls.
+                                    int bx0 = cx << 4, bz0 = cz << 4;
+                                    List<SetBlockPayload> blocks = new ArrayList<>();
+
+                                    for (int bx = bx0; bx < bx0 + 16; bx++) {
+                                        if (bx < minX || bx >= maxX) continue;
+                                        for (int bz = bz0; bz < bz0 + 16; bz++) {
+                                            if (bz < minZ || bz >= maxZ) continue;
+
+                                            DhApiResult<DhApiTerrainDataPoint[]> col =
+                                                    DhApi.Delayed.terrainRepo.getColumnDataAtBlockPos(levelWrapper, bx, bz, cache);
+                                            if (col == null || col.payload == null) continue;
+
+                                            // DH returns columns top-to-bottom; clone and sort ascending (bottom first)
+                                            DhApiTerrainDataPoint[] sorted = col.payload.clone();
+                                            Arrays.sort(sorted, Comparator.comparingInt(dp -> dp.bottomYBlockPos));
+
+                                            for (DhApiTerrainDataPoint dp : sorted) {
+                                                if (dp == null || dp.blockStateWrapper == null) continue;
+                                                String bID = dp.blockStateWrapper.getSerialString();
+                                                int yStart = Math.max(dp.bottomYBlockPos, minY);
+                                                int yEnd   = Math.min(dp.topYBlockPos,    maxY - 1);
+                                                for (int y = yStart; y <= yEnd; y++)
+                                                    blocks.add(new SetBlockPayload(new BlockPos(bx, y, bz), bID));
                                             }
                                         }
-
-                                        int done = chunksProcessed.incrementAndGet();
-                                        if (done % 50 == 0 || done == totalChunks) {
-                                            int pct = (int)((done / (float) totalChunks) * 100);
-                                            mc.execute(() -> {
-                                                if (mc.player != null)
-                                                    mc.player.sendMessage(Text.of("[DHRescue] Collecting: " + done + "/" + totalChunks + " chunks (" + pct + "%)"), true);
-                                            });
-                                        }
                                     }
-                                } catch (Exception e) {
-                                    e.printStackTrace();
-                                } finally {
-                                    latch.countDown();
+
+                                    if (blocks.isEmpty()) {
+                                        // Nothing to place — count as done immediately
+                                        updateProgress(mc, doneChunks, lastReportedPct, totalChunks);
+                                        continue;
+                                    }
+
+                                    // --- 2. Register latch BEFORE sending anything ---
+                                    long key = DHRescueNetworking.chunkKey(cx, cz);
+                                    CountDownLatch latch = new CountDownLatch(1);
+                                    DHRescueNetworking.pendingChunks.put(key, latch);
+
+                                    // --- 3. Send all blocks + ChunkDone atomically on the main thread ---
+                                    // Submitting as a single Runnable ensures no other chunk's packets interleave.
+                                    final int fcx = cx, fcz = cz;
+                                    mc.execute(() -> {
+                                        for (SetBlockPayload p : blocks)
+                                            ClientPlayNetworking.send(p);
+                                        // ChunkDone is queued AFTER all blocks on the same connection,
+                                        // so the server will have processed all blocks before the ack.
+                                        ClientPlayNetworking.send(new ChunkDonePayload(fcx, fcz));
+                                    });
+
+                                    // --- 4. Wait for server ack before moving to the next chunk ---
+                                    try {
+                                        boolean acked = latch.await(30, TimeUnit.SECONDS);
+                                        if (!acked && mc.player != null)
+                                            mc.player.sendMessage(
+                                                Text.of("[DHRescue] Warning: chunk (" + fcx + "," + fcz + ") timed out — server may be lagging"), false);
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                        break;
+                                    } finally {
+                                        DHRescueNetworking.pendingChunks.remove(key);
+                                    }
+
+                                    // --- 5. Report progress ---
+                                    updateProgress(mc, doneChunks, lastReportedPct, totalChunks);
                                 }
                             });
                         }
 
-                        // Wait for all workers then signal done
+                        // Watcher thread: waits for all workers then announces completion
                         Thread watcher = new Thread(() -> {
-                            try { latch.await(); } catch (InterruptedException ignored) {}
                             pool.shutdown();
-                            collectingDone.set(true);
-                            mc.execute(() -> {
-                                if (mc.player != null)
-                                    mc.player.sendMessage(Text.of("[DHRescue] Collection done — " + totalQueued.get() + " blocks queued to send."), false);
-                            });
+                            try { pool.awaitTermination(1, TimeUnit.HOURS); } catch (InterruptedException ignored) {}
+                            isRunning.set(false);
+                            if (mc.player != null)
+                                mc.player.sendMessage(Text.of("[DHRescue] Done! All " + totalChunks + " chunks processed."), false);
                         }, "DHRescue-Watcher");
                         watcher.setDaemon(true);
                         watcher.start();
 
                         return 1;
-                })))))))
-            );
+                    }))))))));
         });
+    }
+
+    private static void updateProgress(MinecraftClient mc, AtomicInteger doneChunks,
+                                       AtomicInteger lastReportedPct, int totalChunks) {
+        int done = doneChunks.incrementAndGet();
+        if (totalChunks == 0) return;
+        int pct = done * 100 / totalChunks;
+        int last = lastReportedPct.get();
+        // Report every 5%
+        if (pct >= last + 5 && lastReportedPct.compareAndSet(last, pct)) {
+            if (mc.player != null)
+                mc.player.sendMessage(Text.of("[DHRescue] " + done + "/" + totalChunks + " chunks (" + pct + "%)"), false);
+        }
     }
 }
 
