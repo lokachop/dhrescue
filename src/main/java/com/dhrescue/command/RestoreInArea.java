@@ -34,7 +34,7 @@ public class RestoreInArea {
 
             // --- /dhrescue_restoreradius <radiusChunks> ---
             dispatcher.register(ClientCommandManager.literal("dhrescue_restoreradius")
-                    .then(argument("radiusChunks", IntegerArgumentType.integer(1))
+                    .then(argument("radiusChunks", IntegerArgumentType.integer(0))
                     .executes(context -> {
                         MinecraftClient mc = MinecraftClient.getInstance();
                         if (mc == null || mc.player == null) { System.out.println("[DHRescue] No player"); return 0; }
