@@ -96,6 +96,15 @@ public class RestoreInArea {
                                    int minX, int minY, int minZ, int maxX, int maxY, int maxZ) {
         isRunning.set(true);
 
+        // Freeze ticks directly via the server tick manager before any blocks are placed
+        mc.execute(() -> {
+            if (mc.getServer() != null) {
+                DHRescueNetworking.freezeTicks(mc.getServer());
+                if (mc.player != null)
+                    mc.player.sendMessage(net.minecraft.text.Text.of("[DHRescue] Ticks frozen. Run /tick unfreeze when done."), false);
+            }
+        });
+
         int chunkMinX = minX >> 4;
         int chunkMinZ = minZ >> 4;
         int chunkMaxX = (maxX - 1) >> 4;

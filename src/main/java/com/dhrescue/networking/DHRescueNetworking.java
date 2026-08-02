@@ -37,6 +37,12 @@ public class DHRescueNetworking {
         PayloadTypeRegistry.playS2C().register(ChunkAckPayload.ID, ChunkAckPayload.CODEC);
     }
 
+    /** Freeze server ticks directly via the tick manager. Safe to call on the server thread. */
+    public static void freezeTicks(MinecraftServer server) {
+        server.getTickManager().setFrozen(true);
+        LOGGER.info("[DHRescue] Ticks frozen.");
+    }
+
     /** Call this only on the client side. */
     public static void registerClient() {
         // When the server acks a chunk, release the waiting worker thread.

@@ -55,6 +55,12 @@ public class DHRescue implements ModInitializer
 			DHRescueNetworking.registerClient();
 		}
 
+		// Freeze ticks on every server start before physics can run,
+		// so restored blocks (sand, etc.) don't fall when the world reloads.
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			DHRescueNetworking.freezeTicks(server);
+		});
+
 		// Register commands
 		RestoreInArea.register();
 		
