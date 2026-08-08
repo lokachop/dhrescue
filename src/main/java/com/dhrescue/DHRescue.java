@@ -16,15 +16,8 @@ import org.slf4j.LoggerFactory;
 
 
 /**
- * This is the Fabric "Hello World" project
- * for the Distant Horizons API. <br>
- * This example is designed to be a jumping-off
- * point, so you can start using the DH API. <br><br>
- *
- * If at any point you have questions or issues,
- * feel free to stop by our Discord.
- * 
- * @version 2024-08-02
+ * Reads Distant Horizons LOD terrain data and restores it back into
+ * real in-game blocks, for recovering corrupted or deleted chunks.
  */
 public class DHRescue implements ModInitializer
 {
@@ -49,6 +42,17 @@ public class DHRescue implements ModInitializer
 
 		// Serverside only
 		DHRescueNetworking.register_SV();
+
+		// Client-side only (S2C receivers)
+		if (FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
+			DHRescueNetworking.registerClient();
+		}
+
+		// Freeze ticks on every server start before physics can run,
+		// so restored blocks (sand, etc.) don't fall when the world reloads.
+		net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			DHRescueNetworking.freezeTicks(server);
+		});
 
 		// Register commands
 		RestoreInArea.register();
