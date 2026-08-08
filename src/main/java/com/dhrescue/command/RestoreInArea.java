@@ -156,8 +156,10 @@ public class RestoreInArea {
                             for (DhApiTerrainDataPoint dp : sorted) {
                                 if (dp == null || dp.blockStateWrapper == null) continue;
                                 String bID = dp.blockStateWrapper.getSerialString();
-                                int yStart = Math.max(dp.bottomYBlockPos, minY);
-                                int yEnd   = Math.min(dp.topYBlockPos,    maxY - 1);
+                                // topYBlockPos is exclusive (DH stores it as bottomY + height),
+                                // so the last real block of the run is topYBlockPos - 1.
+                                int yStart = Math.max(dp.bottomYBlockPos,  minY);
+                                int yEnd   = Math.min(dp.topYBlockPos - 1, maxY - 1);
                                 for (int y = yStart; y <= yEnd; y++)
                                     blocks.add(new SetBlockPayload(new BlockPos(bx, y, bz), bID));
                             }
